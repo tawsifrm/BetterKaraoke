@@ -5,13 +5,15 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
+  Platform,
 } from 'react-native';
-import { router } from 'expo-router';
 import { Audio } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { LyricsPlaybackControls } from '@/components/LyricsPlaybackControls';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 
@@ -109,6 +111,8 @@ export default function SongsScreen() {
   const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isLoading, setIsLoading] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [showPlaybackControls, setShowPlaybackControls] = useState(false);
 
   useEffect(() => {
     return sound
@@ -127,6 +131,7 @@ export default function SongsScreen() {
         await sound.unloadAsync();
         setSound(null);
         setCurrentlyPlaying(null);
+        setIsPlaying(false);
       }
 
       // Load and play new audio
@@ -134,12 +139,20 @@ export default function SongsScreen() {
       
       setSound(newSound);
       setCurrentlyPlaying(song.id);
+      setIsPlaying(true);
+      setShowPlaybackControls(true);
       
       // Set up playback status update
       newSound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          setCurrentlyPlaying(null);
-          setSound(null);
+        if (status.isLoaded) {
+          if (status.didJustFinish) {
+            setCurrentlyPlaying(null);
+            setSound(null);
+            setIsPlaying(false);
+            setShowPlaybackControls(false);
+          } else if (status.isPlaying !== undefined) {
+            setIsPlaying(status.isPlaying);
+          }
         }
       });
 
@@ -161,36 +174,67 @@ export default function SongsScreen() {
       await sound.unloadAsync();
       setSound(null);
       setCurrentlyPlaying(null);
+      setIsPlaying(false);
+      setShowPlaybackControls(false);
     }
   };
 
-  const goBack = () => {
-    router.back();
+  const togglePlayPause = async () => {
+    if (!sound) return;
+    
+    try {
+      if (isPlaying) {
+        await sound.pauseAsync();
+      } else {
+        await sound.playAsync();
+      }
+    } catch (error) {
+      console.error('Error toggling playback:', error);
+    }
+  };
+
+  const playNext = () => {
+    if (!currentlyPlaying) return;
+    
+    const currentIndex = SONGS.findIndex(song => song.id === currentlyPlaying);
+    const nextIndex = (currentIndex + 1) % SONGS.length;
+    playAudio(SONGS[nextIndex]);
+  };
+
+  const playPrevious = () => {
+    if (!currentlyPlaying) return;
+    
+    const currentIndex = SONGS.findIndex(song => song.id === currentlyPlaying);
+    const previousIndex = currentIndex === 0 ? SONGS.length - 1 : currentIndex - 1;
+    playAudio(SONGS[previousIndex]);
+  };
+
+  const handleSeek = (position: number) => {
+    if (sound) {
+      sound.setPositionAsync(position);
+    }
+  };
+
+  const closePlaybackControls = () => {
+    stopAudio();
   };
 
   return (
     <ThemedView style={styles.container}>
-      {/* Background Gradient */}
-      <LinearGradient
-        colors={[colors.primary + '08', colors.accent + '05', 'transparent']}
-        style={styles.backgroundGradient}
-      />
-      
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity 
-          style={[styles.backButton, { backgroundColor: colors.card }]}
-          onPress={goBack}
-          activeOpacity={0.8}
+          onPress={() => router.push('/')}
+          style={styles.homeButton}
         >
-          <IconSymbol name="chevron.left" size={24} color={colors.primary} />
+          <IconSymbol name="house.fill" size={24} color={colors.primary} />
         </TouchableOpacity>
         <View style={styles.headerTextContainer}>
           <ThemedText type="title" style={[styles.title, { color: colors.text }]}>
-            Choose Your Song
+            🎵 Song Library
           </ThemedText>
           <ThemedText style={[styles.subtitle, { color: colors.icon }]}>
-            {SONGS.length} songs available
+            {SONGS.length} songs available • Tap to play
           </ThemedText>
         </View>
       </View>
@@ -209,7 +253,13 @@ export default function SongsScreen() {
               { backgroundColor: colors.card },
               currentlyPlaying === song.id && { borderColor: colors.primary, borderWidth: 2 }
             ]}
-            onPress={() => currentlyPlaying === song.id ? stopAudio() : playAudio(song)}
+            onPress={() => {
+              if (currentlyPlaying === song.id) {
+                togglePlayPause();
+              } else {
+                playAudio(song);
+              }
+            }}
             activeOpacity={0.7}
           >
             <LinearGradient
@@ -220,7 +270,7 @@ export default function SongsScreen() {
               style={styles.songCardGradient}
             >
               <View style={styles.songInfo}>
-                <View style={[styles.songNumber, { backgroundColor: colors.primary + '15' }]}>
+                <View style={styles.songNumber}>
                   <ThemedText style={[styles.numberText, { color: colors.primary }]}>
                     {String(index + 1).padStart(2, '0')}
                   </ThemedText>
@@ -245,12 +295,12 @@ export default function SongsScreen() {
                   </View>
                 </View>
 
-                <View style={[styles.playButton, { backgroundColor: colors.primary + '15' }]}>
+                <View style={styles.playButton}>
                   {isLoading === song.id ? (
                     <View style={[styles.loadingIndicator, { backgroundColor: colors.primary }]} />
                   ) : (
                     <IconSymbol 
-                      name={currentlyPlaying === song.id ? "pause.fill" : "play.fill"} 
+                      name={currentlyPlaying === song.id && isPlaying ? "pause.fill" : "play.fill"} 
                       size={24} 
                       color={currentlyPlaying === song.id ? colors.primary : colors.icon}
                     />
@@ -262,33 +312,18 @@ export default function SongsScreen() {
         ))}
       </ScrollView>
 
-      {/* Now Playing Bar */}
-      {currentlyPlaying && (
-        <View style={[styles.nowPlayingBar, { backgroundColor: colors.card }]}>
-          <LinearGradient
-            colors={[colors.primary, colors.secondary, colors.accent]}
-            style={styles.nowPlayingGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-          >
-            <View style={styles.nowPlayingContent}>
-              <View style={styles.nowPlayingIcon}>
-                <IconSymbol name="music.note" size={20} color="white" />
-              </View>
-              <View style={styles.nowPlayingTextContainer}>
-                <ThemedText style={styles.nowPlayingText}>
-                  Now Playing
-                </ThemedText>
-                <ThemedText style={styles.nowPlayingSong}>
-                  {SONGS.find(s => s.id === currentlyPlaying)?.title}
-                </ThemedText>
-              </View>
-              <TouchableOpacity onPress={stopAudio} style={styles.stopButton}>
-                <IconSymbol name="xmark" size={20} color="white" />
-              </TouchableOpacity>
-            </View>
-          </LinearGradient>
-        </View>
+      {/* Playback Controls */}
+      {showPlaybackControls && currentlyPlaying && (
+        <LyricsPlaybackControls
+          sound={sound}
+          currentSong={SONGS.find(s => s.id === currentlyPlaying)}
+          isPlaying={isPlaying}
+          onPlayPause={togglePlayPause}
+          onNext={playNext}
+          onPrevious={playPrevious}
+          onSeek={handleSeek}
+          onClose={closePlaybackControls}
+        />
       )}
     </ThemedView>
   );
@@ -298,13 +333,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  backgroundGradient: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -312,29 +340,25 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 20,
   },
-  backButton: {
+  homeButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
+    backgroundColor: 'rgba(8, 145, 178, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
   },
   headerTextContainer: {
     flex: 1,
   },
   title: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
   },
   subtitle: {
     fontSize: 14,
-    marginTop: 2,
+    marginTop: 4,
   },
   scrollView: {
     flex: 1,
@@ -342,15 +366,23 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 20,
     paddingTop: 0,
+    paddingBottom: 40,
   },
   songCard: {
     borderRadius: 16,
     marginBottom: 12,
     elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      web: {
+        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+      },
+    }),
     overflow: 'hidden',
   },
   songCardGradient: {
@@ -409,53 +441,5 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
     opacity: 0.6,
-  },
-  nowPlayingBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 60,
-  },
-  nowPlayingGradient: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  nowPlayingContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  nowPlayingText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '500',
-    opacity: 0.8,
-  },
-  nowPlayingIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  nowPlayingTextContainer: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  nowPlayingSong: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  stopButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });
