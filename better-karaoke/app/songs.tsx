@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   TouchableOpacity,
@@ -14,6 +14,7 @@ import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { mixAudioTracks, startRecording, stopRecording } from '@/utils/audioUtils';
 
 interface Song {
   id: string;
@@ -109,16 +110,23 @@ export default function SongsScreen() {
   const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isLoading, setIsLoading] = useState<string | null>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
 
+  // Cleanup on unmount
   useEffect(() => {
-    return sound
-      ? () => {
-          sound.unloadAsync();
-        }
-      : undefined;
+    return () => {
+      if (sound) {
+        sound.unloadAsync();
+      }
+      if (recordingRef.current) {
+        recordingRef.current.stopAndUnloadAsync();
+      }
+    };
   }, [sound]);
 
-  const playAudio = async (song: Song) => {
+  // Removed the separate promptForRecording function as it's now inline
+
+  const startSongPlayback = async (song: Song, shouldRecord: boolean) => {
     try {
       setIsLoading(song.id);
 
@@ -129,6 +137,20 @@ export default function SongsScreen() {
         setCurrentlyPlaying(null);
       }
 
+      // Start recording if requested
+      let recordingUri: string | null = null;
+      if (shouldRecord) {
+        try {
+          const newRecording = await startRecording();
+          recordingRef.current = newRecording;
+        } catch (err) {
+          console.error('Failed to start recording', err);
+          Alert.alert('Error', 'Could not start recording');
+          setIsLoading(null);
+          return;
+        }
+      }
+
       // Load and play new audio
       const { sound: newSound } = await Audio.Sound.createAsync(song.audioSource);
       
@@ -136,10 +158,42 @@ export default function SongsScreen() {
       setCurrentlyPlaying(song.id);
       
       // Set up playback status update
-      newSound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          setCurrentlyPlaying(null);
-          setSound(null);
+      newSound.setOnPlaybackStatusUpdate(async (status) => {
+        if (status.isLoaded) {
+          if (status.didJustFinish) {
+            // Stop recording if active
+            if (recordingRef.current) {
+              try {
+                recordingUri = await stopRecording(recordingRef.current);
+                
+                if (recordingUri) {
+                  // Mix the recording with the song
+                  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+                  const outputFileName = `karaoke-${song.title.replace(/\s+/g, '-')}-${timestamp}`;
+                  
+                  await mixAudioTracks(
+                    song.audioSource.uri || song.audioSource,
+                    recordingUri,
+                    outputFileName
+                  );
+                  
+                  Alert.alert(
+                    'Recording Saved',
+                    'Your performance has been saved to your media library!',
+                    [{ text: 'OK' }]
+                  );
+                }
+              } catch (err) {
+                console.error('Error processing recording', err);
+                Alert.alert('Error', 'Could not save your recording');
+              } finally {
+                recordingRef.current = null;
+              }
+            }
+            
+            setCurrentlyPlaying(null);
+            setSound(null);
+          }
         }
       });
 
@@ -151,9 +205,20 @@ export default function SongsScreen() {
         'Unable to play this song. Please try again.',
         [{ text: 'OK' }]
       );
+      
+      // Clean up recording if there was an error
+      if (recordingRef.current) {
+        await recordingRef.current.stopAndUnloadAsync();
+        recordingRef.current = null;
+      }
     } finally {
       setIsLoading(null);
     }
+  };
+
+  const playAudio = async (song: Song, shouldRecord: boolean) => {
+    console.log('playAudio called with song:', song.title, 'shouldRecord:', shouldRecord);
+    startSongPlayback(song, shouldRecord);
   };
 
   const stopAudio = async () => {
@@ -193,6 +258,13 @@ export default function SongsScreen() {
             {SONGS.length} songs available
           </ThemedText>
         </View>
+        <TouchableOpacity 
+          style={[styles.multiplayerButton, { backgroundColor: colors.accent }]}
+          onPress={() => router.push('/multiplayer' as any)}
+          activeOpacity={0.8}
+        >
+          <IconSymbol name="person.2.fill" size={20} color="white" />
+        </TouchableOpacity>
       </View>
 
       {/* Songs List */}
@@ -201,65 +273,90 @@ export default function SongsScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {SONGS.map((song, index) => (
-          <TouchableOpacity
-            key={song.id}
-            style={[
-              styles.songCard,
-              { backgroundColor: colors.card },
-              currentlyPlaying === song.id && { borderColor: colors.primary, borderWidth: 2 }
-            ]}
-            onPress={() => currentlyPlaying === song.id ? stopAudio() : playAudio(song)}
-            activeOpacity={0.7}
-          >
-            <LinearGradient
-              colors={currentlyPlaying === song.id 
-                ? [colors.primary + '20', colors.accent + '10'] 
-                : ['transparent', 'transparent']
-              }
-              style={styles.songCardGradient}
-            >
-              <View style={styles.songInfo}>
-                <View style={[styles.songNumber, { backgroundColor: colors.primary + '15' }]}>
-                  <ThemedText style={[styles.numberText, { color: colors.primary }]}>
-                    {String(index + 1).padStart(2, '0')}
-                  </ThemedText>
-                </View>
-                
-                <View style={styles.songDetails}>
-                  <ThemedText style={[styles.songTitle, { color: colors.text }]} numberOfLines={1}>
-                    {song.title}
-                  </ThemedText>
-                  <View style={styles.songMeta}>
-                    <ThemedText style={[styles.artistName, { color: colors.icon }]} numberOfLines={1}>
-                      {song.artist}
-                    </ThemedText>
-                    {song.duration && (
-                      <>
-                        <View style={[styles.dot, { backgroundColor: colors.icon }]} />
-                        <ThemedText style={[styles.duration, { color: colors.icon }]}>
-                          {song.duration}
-                        </ThemedText>
-                      </>
-                    )}
+        {SONGS.map((song, index) => {
+          return (
+            <View key={song.id} style={styles.songCardContainer}>
+              <View
+                style={[
+                  styles.songCard,
+                  { backgroundColor: colors.card },
+                  currentlyPlaying === song.id && { borderColor: colors.primary, borderWidth: 2 }
+                ]}
+              >
+                <View style={styles.songCardGradient}>
+                  <View style={styles.songInfo}>
+                    <View style={[styles.songNumber, { backgroundColor: colors.primary + '15' }]}>
+                      <ThemedText style={[styles.numberText, { color: colors.primary }]}>
+                        {String(index + 1).padStart(2, '0')}
+                      </ThemedText>
+                    </View>
+                    
+                    <View style={styles.songDetails}>
+                      <ThemedText style={[styles.songTitle, { color: colors.text }]}>
+                        {song.title}
+                      </ThemedText>
+                      <ThemedText style={[styles.artistName, { color: colors.icon }]}>
+                        {song.artist}
+                      </ThemedText>
+                    </View>
+
+                    <TouchableOpacity 
+                      style={styles.playButton}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        console.log('Play button pressed for:', song.title);
+                        if (currentlyPlaying === song.id) {
+                          console.log('Stopping audio from play button');
+                          stopAudio();
+                        } else {
+                          console.log('Starting audio from play button');
+                          Alert.alert(
+                            'Karaoke Mode',
+                            'Would you like to record your performance?',
+                            [
+                              {
+                                text: 'Just Play',
+                                onPress: () => {
+                                  console.log('User chose: Just Play');
+                                  playAudio(song, false);
+                                },
+                              },
+                              {
+                                text: 'Record & Play',
+                                onPress: () => {
+                                  console.log('User chose: Record & Play');
+                                  playAudio(song, true);
+                                },
+                              },
+                              {
+                                text: 'Cancel',
+                                style: 'cancel',
+                                onPress: () => {
+                                  console.log('User chose: Cancel');
+                                },
+                              },
+                            ]
+                          );
+                        }
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      {isLoading === song.id ? (
+                        <View style={[styles.loadingIndicator, { backgroundColor: colors.primary }]} />
+                      ) : (
+                        <IconSymbol 
+                          name={currentlyPlaying === song.id ? "stop.fill" : "play.fill"} 
+                          size={24} 
+                          color={currentlyPlaying === song.id ? colors.primary : colors.icon}
+                        />
+                      )}
+                    </TouchableOpacity>
                   </View>
                 </View>
-
-                <View style={[styles.playButton, { backgroundColor: colors.primary + '15' }]}>
-                  {isLoading === song.id ? (
-                    <View style={[styles.loadingIndicator, { backgroundColor: colors.primary }]} />
-                  ) : (
-                    <IconSymbol 
-                      name={currentlyPlaying === song.id ? "pause.fill" : "play.fill"} 
-                      size={24} 
-                      color={currentlyPlaying === song.id ? colors.primary : colors.icon}
-                    />
-                  )}
-                </View>
               </View>
-            </LinearGradient>
-          </TouchableOpacity>
-        ))}
+            </View>
+          );
+        })}
       </ScrollView>
 
       {/* Now Playing Bar */}
@@ -295,6 +392,9 @@ export default function SongsScreen() {
 }
 
 const styles = StyleSheet.create({
+  songCardContainer: {
+    marginBottom: 12,
+  },
   container: {
     flex: 1,
   },
@@ -319,6 +419,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  multiplayerButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },

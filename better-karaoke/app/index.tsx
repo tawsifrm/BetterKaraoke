@@ -41,25 +41,46 @@ export default function HomeScreen() {
         </ThemedText>
       </View>
 
-      {/* Main Action Button */}
-      <TouchableOpacity 
-        style={styles.mainButton}
-        onPress={navigateToSongs}
-        activeOpacity={0.9}
-      >
-        <LinearGradient
-          colors={[colors.primary, colors.secondary, colors.accent]}
-          style={styles.gradientButton}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
+      {/* Main Action Buttons */}
+      <View style={styles.mainButtonsContainer}>
+        <TouchableOpacity 
+          style={[styles.mainButton, styles.primaryButton]}
+          onPress={navigateToSongs}
+          activeOpacity={0.9}
         >
-          <View style={styles.buttonIconContainer}>
-            <IconSymbol name="music.note" size={48} color="white" />
-          </View>
-          <ThemedText style={styles.buttonText}>Start Singing</ThemedText>
-          <ThemedText style={styles.buttonSubtext}>Choose from 8 amazing songs</ThemedText>
-        </LinearGradient>
-      </TouchableOpacity>
+          <LinearGradient
+            colors={[colors.primary, colors.secondary, colors.accent]}
+            style={styles.gradientButton}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <View style={styles.buttonIconContainer}>
+              <IconSymbol name="music.note" size={48} color="white" />
+            </View>
+            <ThemedText style={styles.buttonText}>Start Singing</ThemedText>
+            <ThemedText style={styles.buttonSubtext}>Choose from thousands of songs or upload your own</ThemedText>
+          </LinearGradient>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={[styles.mainButton, styles.secondaryButton]}
+          onPress={() => router.push('/multiplayer' as any)}
+          activeOpacity={0.9}
+        >
+          <LinearGradient
+            colors={[colors.accent, colors.secondary, colors.primary]}
+            style={styles.gradientButton}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <View style={styles.buttonIconContainer}>
+              <IconSymbol name="person.2.fill" size={48} color="white" />
+            </View>
+            <ThemedText style={styles.buttonText}>Multiplayer</ThemedText>
+            <ThemedText style={styles.buttonSubtext}>Compete with friends</ThemedText>
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
 
       {/* Feature Cards */}
       <View style={styles.featuresContainer}>
@@ -151,9 +172,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     opacity: 0.8,
   },
+  mainButtonsContainer: {
+    marginBottom: 40,
+    gap: 20,
+  },
   mainButton: {
     borderRadius: 20,
-    marginBottom: 40,
     elevation: 8,
     ...Platform.select({
       ios: {
@@ -166,6 +190,12 @@ const styles = StyleSheet.create({
         boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
       },
     }),
+  },
+  primaryButton: {
+    marginBottom: 0,
+  },
+  secondaryButton: {
+    marginBottom: 0,
   },
   gradientButton: {
     paddingVertical: 30,
